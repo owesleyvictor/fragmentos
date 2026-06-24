@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Criador de UTMs da Gude</title>
+<link rel="stylesheet" href="styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/easyqrcodejs@4.4.13/dist/easy.qrcode.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo-mark">g<span>u</span>de</div>
+      <div class="brand-text">
+        <strong>Criador de UTMs</strong>
+        <span>Comunicação Educacional</span>
+      </div>
+    </div>
+    <div class="user-box">
+      <label for="currentUser">Identificação de quem está usando</label>
+      <input id="currentUser" type="text" placeholder="Seu nome" />
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-view="dashboard">📋 Campanhas</button>
+    <button class="tab-btn" data-view="campaign" id="tabCampaign" disabled>🔗 Tagueador</button>
+  </nav>
+
+  <main id="dashboardView" class="view">
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Campanhas cadastradas</h2>
+        <button class="btn btn-primary" id="btnNewCampaign">+ Nova campanha</button>
+      </div>
+
+      <div class="filters">
+        <input type="text" id="searchBox" placeholder="Buscar por empresa, unidade, campanha ou slug..." />
+        <select id="filterEmpresa"><option value="">Todas as empresas/unidades</option></select>
+        <button class="btn btn-ghost" id="btnExportAll">⬇️ Exportar tudo</button>
+        <button class="btn btn-ghost" id="btnExportSelected">⬇️ Exportar selecionadas</button>
+        <button class="btn btn-ghost" id="btnSelectAll">☑ Selecionar tudo</button>
+      </div>
+
+      <div class="table-wrap">
+        <table id="campaignsTable">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Empresa / Unidade</th>
+              <th>Campanha</th>
+              <th>Slug (utm_campaign)</th>
+              <th>Tags criadas</th>
+              <th>Criado por</th>
+              <th>Criado em</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="campaignsTbody"></tbody>
+        </table>
+        <p id="emptyState" class="empty-state" hidden>Nenhuma campanha encontrada. Crie a primeira campanha acima.</p>
+      </div>
+    </section>
+  </main>
+
+  <main id="campaignView" class="view" hidden>
+    <button class="btn btn-link" id="btnBack">← Voltar para campanhas</button>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Dados da campanha</h2>
+        <div>
+          <button class="btn btn-ghost" id="btnExportCampaign">⬇️ Exportar esta campanha</button>
+          <button class="btn btn-danger" id="btnDeleteCampaign">🗑 Excluir campanha</button>
+        </div>
+      </div>
+      <div class="grid-fields">
+        <div class="field">
+          <label>Empresa <span class="req">*</span></label>
+          <input type="text" id="f_empresa" placeholder="Ex: Gude Comunicação Educacional" />
+        </div>
+        <div class="field">
+          <label>Unidade / Cliente <span class="req">*</span></label>
+          <input type="text" id="f_unidade" placeholder="Ex: UNIVAS" />
+        </div>
+        <div class="field">
+          <label>Nome da campanha <span class="req">*</span></label>
+          <input type="text" id="f_nome" placeholder="Ex: Segunda Graduação 2025.1" />
+        </div>
+        <div class="field">
+          <label>utm_campaign (slug) <span class="req">*</span> <i class="info-icon" data-info="utm_campaign">i</i></label>
+          <input type="text" id="f_slug" placeholder="Ex: segunda-graduacao-2025-1" />
+        </div>
+        <div class="field wide">
+          <label>URL base (link de destino) <span class="req">*</span></label>
+          <input type="text" id="f_baseurl" placeholder="https://exemplo.crmeducacional.com/Login/00000" />
+        </div>
+        <div class="field wide">
+          <label>Descrição / observações</label>
+          <textarea id="f_descricao" placeholder="Contexto da campanha, período, objetivo..."></textarea>
+        </div>
+      </div>
+      <div class="meta-line" id="campaignMeta"></div>
+      <div class="panel-actions">
+        <button class="btn btn-primary" id="btnSaveCampaign">Salvar dados da campanha</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Gerador de link UTM</h2>
+        <i class="info-icon" data-info="overview">i</i>
+      </div>
+      <div class="grid-fields utm-grid">
+        <div class="field">
+          <label>Plataforma / Rótulo <i class="info-icon" data-info="plataforma">i</i></label>
+          <input type="text" id="utm_plataforma" placeholder="Ex: BIO INSTAGRAM" />
+        </div>
+        <div class="field">
+          <label>utm_source <span class="req">*</span> <i class="info-icon" data-info="source">i</i></label>
+          <input type="text" id="utm_source" placeholder="Ex: instagram" />
+        </div>
+        <div class="field">
+          <label>utm_medium <span class="req">*</span> <i class="info-icon" data-info="medium">i</i></label>
+          <input type="text" id="utm_medium" placeholder="Ex: bio" />
+        </div>
+        <div class="field">
+          <label>utm_term <i class="info-icon" data-info="term">i</i></label>
+          <input type="text" id="utm_term" placeholder="(opcional)" />
+        </div>
+        <div class="field">
+          <label>utm_content <i class="info-icon" data-info="content">i</i></label>
+          <input type="text" id="utm_content" placeholder="(opcional)" />
+        </div>
+      </div>
+      <div class="checkbox-row">
+        <label><input type="checkbox" id="chk_source" checked /> incluir utm_source</label>
+        <label><input type="checkbox" id="chk_medium" checked /> incluir utm_medium</label>
+        <label><input type="checkbox" id="chk_campaign" checked /> incluir utm_campaign</label>
+        <label><input type="checkbox" id="chk_term" /> incluir utm_term</label>
+        <label><input type="checkbox" id="chk_content" /> incluir utm_content</label>
+      </div>
+      <div class="preview-link">
+        <label>Pré-visualização do link final</label>
+        <div class="preview-box" id="linkPreview">—</div>
+      </div>
+      <div class="panel-actions">
+        <button class="btn btn-primary" id="btnAddTag">+ Adicionar link à campanha</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Links gerados</h2>
+      </div>
+      <div class="table-wrap">
+        <table id="tagsTable">
+          <thead>
+            <tr>
+              <th>Plataforma</th>
+              <th>Source</th>
+              <th>Medium</th>
+              <th>Term</th>
+              <th>Content</th>
+              <th>Link final</th>
+              <th>URL encurtada</th>
+              <th>QR Code</th>
+              <th>Criado por</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="tagsTbody"></tbody>
+        </table>
+        <p id="emptyTagsState" class="empty-state" hidden>Nenhum link gerado ainda nesta campanha.</p>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal-overlay" id="infoModal" hidden>
+    <div class="modal">
+      <button class="modal-close" id="closeInfoModal">×</button>
+      <h3 id="infoModalTitle"></h3>
+      <p id="infoModalText"></p>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="qrModal" hidden>
+    <div class="modal">
+      <button class="modal-close" id="closeQrModal">×</button>
+      <h3>QR Code do link</h3>
+      <div id="qrContainer"></div>
+      <p class="qr-url" id="qrUrlText"></p>
+      <div class="panel-actions">
+        <button class="btn btn-ghost" id="btnDownloadPng">Baixar PNG</button>
+        <button class="btn btn-ghost" id="btnDownloadSvg">Baixar SVG</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
