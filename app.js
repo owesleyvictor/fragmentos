@@ -1,6 +1,5 @@
-/* Criador de UTMs da Gude - lógica do app (client-side, localStorage) */
+/* Criador de UTMs da Gude - lógica do app (dados salvos no Supabase, acessível de qualquer dispositivo) */
 
-const STORAGE_KEY = 'gude_utm_campaigns_v1';
 const USER_KEY = 'gude_utm_current_user';
 
 const INFO_TEXTS = {
@@ -13,28 +12,33 @@ const INFO_TEXTS = {
   utm_campaign: 'utm_campaign: identifica a campanha como um todo. Use um slug sem espaços/acentos, ex: segunda-graduacao-2025-1. Esse valor é usado em todos os links desta campanha.'
 };
 
-let state = { campaigns: [] };
+let supabaseClient = null;
+let campaigns = []; // cache local da última leitura do banco
 let currentCampaignId = null;
 
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    state = raw ? JSON.parse(raw) : { campaigns: [] };
-  } catch (e) {
-    state = { campaigns: [] };
-  }
+function isConfigured() {
+  return window.SUPABASE_URL && window.SUPABASE_ANON_KEY &&
+    !window.SUPABASE_URL.includes('COLE_AQUI') && !window.SUPABASE_ANON_KEY.includes('COLE_AQUI');
 }
 
-function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+function initSupabase() {
+  const banner = document.getElementById('connBanner');
+  if (!isConfigured()) {
+    banner.hidden = false;
+    banner.textContent = 'Supabase não configurado ainda: edite o arquivo config.js com a URL e a anon key do seu projeto para os dados serem salvos na nuvem e acessíveis em qualquer dispositivo.';
+    return false;
+  }
+  supabaseClient = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+  banner.hidden = true;
+  return true;
 }
 
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-function nowStr() {
-  return new Date().toLocaleString('pt-BR');
+function nowStr(d) {
+  return new Date(d || Date.now()).toLocaleString('pt-BR');
 }
 
 function getCurrentUser() {
@@ -60,6 +64,50 @@ function slugify(str) {
     .replace(/^-+|-+$/g, '');
 }
 
+/* ---------------- Carregamento de dados ---------------- */
+
+async function loadCampaigns() {
+  if (!supabaseClient) return;
+  const { data: camps, error } = await supabaseClient
+    .from('campaigns')
+    .select('*')
+    .order('criado_em', { ascending: false });
+  if (error) { showToast('Erro ao carregar campanhas: ' + error.message); return; }
+
+  const { data: tags, error: tagsError } = await supabaseClient
+    .from('tags')
+    .select('*')
+    .order('criado_em', { ascending: true });
+  if (tagsError) { showToast('Erro ao carregar links: ' + tagsError.message); return; }
+
+  campaigns = camps.map(c => ({
+    id: c.id,
+    empresa: c.empresa,
+    unidade: c.unidade,
+    nome: c.nome,
+    slug: c.slug,
+    baseUrl: c.base_url,
+    descricao: c.descricao || '',
+    criadoPor: c.criado_por,
+    criadoEm: nowStr(c.criado_em),
+    criadoEmTs: new Date(c.criado_em).getTime(),
+    atualizadoPor: c.atualizado_por,
+    atualizadoEm: c.atualizado_em ? nowStr(c.atualizado_em) : '',
+    tags: tags.filter(t => t.campaign_id === c.id).map(t => ({
+      id: t.id,
+      plataforma: t.plataforma,
+      source: t.source,
+      medium: t.medium,
+      term: t.term,
+      content: t.content,
+      link: t.link,
+      shortUrl: t.short_url || '',
+      criadoPor: t.criado_por,
+      criadoEm: nowStr(t.criado_em)
+    }))
+  }));
+}
+
 /* ---------------- Dashboard ---------------- */
 
 function renderDashboard() {
@@ -67,15 +115,14 @@ function renderDashboard() {
   const search = document.getElementById('searchBox').value.trim().toLowerCase();
   const empresaFilter = document.getElementById('filterEmpresa').value;
 
-  // populate empresa filter options
   const empresaSel = document.getElementById('filterEmpresa');
-  const empresas = [...new Set(state.campaigns.map(c => c.empresa).filter(Boolean))].sort();
+  const empresas = [...new Set(campaigns.map(c => c.empresa).filter(Boolean))].sort();
   const prevVal = empresaSel.value;
   empresaSel.innerHTML = '<option value="">Todas as empresas/unidades</option>' +
     empresas.map(e => `<option value="${escapeHtml(e)}">${escapeHtml(e)}</option>`).join('');
   empresaSel.value = prevVal;
 
-  let list = state.campaigns.slice().sort((a, b) => (b.criadoEmTs || 0) - (a.criadoEmTs || 0));
+  let list = campaigns.slice().sort((a, b) => (b.criadoEmTs || 0) - (a.criadoEmTs || 0));
 
   if (empresaFilter) list = list.filter(c => c.empresa === empresaFilter);
   if (search) {
@@ -111,30 +158,20 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function createNewCampaign() {
-  const c = {
-    id: uid(),
-    empresa: '',
-    unidade: '',
-    nome: '',
-    slug: '',
-    baseUrl: '',
-    descricao: '',
-    criadoPor: getCurrentUser(),
-    criadoEm: nowStr(),
-    criadoEmTs: Date.now(),
-    atualizadoPor: '',
-    atualizadoEm: '',
-    tags: []
+async function createNewCampaign() {
+  const payload = {
+    empresa: '', unidade: '', nome: 'Nova campanha', slug: 'nova-campanha-' + uid().slice(0, 5),
+    base_url: '', descricao: '', criado_por: getCurrentUser()
   };
-  state.campaigns.push(c);
-  saveState();
-  openCampaign(c.id);
+  const { data, error } = await supabaseClient.from('campaigns').insert(payload).select().single();
+  if (error) { showToast('Erro ao criar campanha: ' + error.message); return; }
+  await loadCampaigns();
+  openCampaign(data.id);
 }
 
 function openCampaign(id) {
   currentCampaignId = id;
-  const c = state.campaigns.find(x => x.id === id);
+  const c = campaigns.find(x => x.id === id);
   if (!c) return;
 
   document.getElementById('f_empresa').value = c.empresa || '';
@@ -155,8 +192,8 @@ function openCampaign(id) {
   updateLinkPreview();
 }
 
-function saveCampaignFields() {
-  const c = state.campaigns.find(x => x.id === currentCampaignId);
+async function saveCampaignFields() {
+  const c = campaigns.find(x => x.id === currentCampaignId);
   if (!c) return;
   const empresa = document.getElementById('f_empresa').value.trim();
   const unidade = document.getElementById('f_unidade').value.trim();
@@ -171,27 +208,25 @@ function saveCampaignFields() {
   }
   if (!slug) slug = slugify(nome);
 
-  c.empresa = empresa;
-  c.unidade = unidade;
-  c.nome = nome;
-  c.slug = slug;
-  c.baseUrl = baseUrl;
-  c.descricao = descricao;
-  c.atualizadoPor = getCurrentUser();
-  c.atualizadoEm = nowStr();
+  const { error } = await supabaseClient.from('campaigns').update({
+    empresa, unidade, nome, slug, base_url: baseUrl, descricao,
+    atualizado_por: getCurrentUser(), atualizado_em: new Date().toISOString()
+  }).eq('id', c.id);
 
-  document.getElementById('f_slug').value = slug;
-  saveState();
+  if (error) { showToast('Erro ao salvar: ' + error.message); return; }
+
+  await loadCampaigns();
   showToast('Dados da campanha salvos.');
   openCampaign(c.id);
 }
 
-function deleteCampaign() {
-  const c = state.campaigns.find(x => x.id === currentCampaignId);
+async function deleteCampaign() {
+  const c = campaigns.find(x => x.id === currentCampaignId);
   if (!c) return;
   if (!confirm(`Excluir a campanha "${c.nome}" e todos os ${c.tags.length} links gerados? Essa ação não pode ser desfeita.`)) return;
-  state.campaigns = state.campaigns.filter(x => x.id !== currentCampaignId);
-  saveState();
+  const { error } = await supabaseClient.from('campaigns').delete().eq('id', c.id);
+  if (error) { showToast('Erro ao excluir: ' + error.message); return; }
+  await loadCampaigns();
   switchView('dashboard');
   renderDashboard();
 }
@@ -227,7 +262,7 @@ function currentFields() {
 }
 
 function updateLinkPreview() {
-  const c = state.campaigns.find(x => x.id === currentCampaignId);
+  const c = campaigns.find(x => x.id === currentCampaignId);
   if (!c) return;
   const url = buildUrl(c, currentFields());
   document.getElementById('linkPreview').textContent = url || 'Preencha a URL base da campanha e os campos UTM.';
@@ -239,8 +274,8 @@ function clearTagForm() {
   });
 }
 
-function addTag() {
-  const c = state.campaigns.find(x => x.id === currentCampaignId);
+async function addTag() {
+  const c = campaigns.find(x => x.id === currentCampaignId);
   if (!c) return;
   if (!c.baseUrl) { showToast('Salve a URL base da campanha antes de gerar links.'); return; }
 
@@ -249,39 +284,37 @@ function addTag() {
   if (f.includeMedium && !f.medium) { showToast('Informe o utm_medium ou desmarque a opção.'); return; }
 
   const link = buildUrl(c, f);
-  const tag = {
-    id: uid(),
+  const payload = {
+    campaign_id: c.id,
     plataforma: f.plataforma,
     source: f.source,
     medium: f.medium,
     term: f.term,
     content: f.content,
     link,
-    shortUrl: '',
-    qrPng: '',
-    qrSvg: '',
-    criadoPor: getCurrentUser(),
-    criadoEm: nowStr()
+    short_url: '',
+    criado_por: getCurrentUser()
   };
-  c.tags.push(tag);
-  saveState();
+  const { error } = await supabaseClient.from('tags').insert(payload);
+  if (error) { showToast('Erro ao adicionar link: ' + error.message); return; }
+
+  await loadCampaigns();
   clearTagForm();
   updateLinkPreview();
   renderTagsTable();
   showToast('Link adicionado à campanha.');
 }
 
-function removeTag(tagId) {
-  const c = state.campaigns.find(x => x.id === currentCampaignId);
-  if (!c) return;
+async function removeTag(tagId) {
   if (!confirm('Remover este link?')) return;
-  c.tags = c.tags.filter(t => t.id !== tagId);
-  saveState();
+  const { error } = await supabaseClient.from('tags').delete().eq('id', tagId);
+  if (error) { showToast('Erro ao remover: ' + error.message); return; }
+  await loadCampaigns();
   renderTagsTable();
 }
 
 function renderTagsTable() {
-  const c = state.campaigns.find(x => x.id === currentCampaignId);
+  const c = campaigns.find(x => x.id === currentCampaignId);
   const tbody = document.getElementById('tagsTbody');
   tbody.innerHTML = '';
   document.getElementById('emptyTagsState').hidden = (c.tags || []).length > 0;
@@ -312,20 +345,18 @@ function renderTagsTable() {
   }));
   tbody.querySelectorAll('.removeTagBtn').forEach(btn => btn.addEventListener('click', () => removeTag(btn.dataset.id)));
   tbody.querySelectorAll('.qrBtn').forEach(btn => btn.addEventListener('click', () => openQrModal(btn.dataset.id)));
-  tbody.querySelectorAll('.short-url-input').forEach(input => input.addEventListener('change', () => {
-    const t = c.tags.find(x => x.id === input.dataset.id);
-    t.shortUrl = input.value.trim();
-    saveState();
+  tbody.querySelectorAll('.short-url-input').forEach(input => input.addEventListener('change', async () => {
+    const { error } = await supabaseClient.from('tags').update({ short_url: input.value.trim() }).eq('id', input.dataset.id);
+    if (error) { showToast('Erro ao salvar URL encurtada: ' + error.message); return; }
+    await loadCampaigns();
     showToast('URL encurtada salva.');
   }));
 }
 
 /* ---------------- QR Code ---------------- */
 
-let qrInstance = null;
-
 function openQrModal(tagId) {
-  const c = state.campaigns.find(x => x.id === currentCampaignId);
+  const c = campaigns.find(x => x.id === currentCampaignId);
   const t = c.tags.find(x => x.id === tagId);
   const url = t.shortUrl || t.link;
 
@@ -333,7 +364,7 @@ function openQrModal(tagId) {
   const container = document.getElementById('qrContainer');
   container.innerHTML = '';
 
-  qrInstance = new QRCode(container, {
+  new QRCode(container, {
     text: url,
     width: 220,
     height: 220,
@@ -347,30 +378,22 @@ function openQrModal(tagId) {
   document.getElementById('btnDownloadSvg').onclick = () => downloadQr(t, 'svg');
 
   document.getElementById('qrModal').hidden = false;
-  document.getElementById('qrModal').dataset.tagId = tagId;
 }
 
 function downloadQr(t, type) {
   const container = document.getElementById('qrContainer');
   const name = `qrcode-${slugify(t.plataforma || t.source || 'utm')}`;
+  const svgEl = container.querySelector('svg');
+  if (!svgEl) { showToast('QR ainda gerando, tente novamente.'); return; }
+  const serializer = new XMLSerializer();
+  let svgStr = serializer.serializeToString(svgEl);
+  if (!svgStr.includes('xmlns=')) {
+    svgStr = svgStr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
   if (type === 'svg') {
-    const svgEl = container.querySelector('svg');
-    if (!svgEl) { showToast('QR ainda gerando, tente novamente.'); return; }
-    const serializer = new XMLSerializer();
-    let svgStr = serializer.serializeToString(svgEl);
-    if (!svgStr.includes('xmlns=')) {
-      svgStr = svgStr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-    }
     const blob = new Blob([svgStr], { type: 'image/svg+xml' });
     triggerDownload(URL.createObjectURL(blob), name + '.svg');
   } else {
-    const svgEl = container.querySelector('svg');
-    if (!svgEl) { showToast('QR ainda gerando, tente novamente.'); return; }
-    const serializer = new XMLSerializer();
-    let svgStr = serializer.serializeToString(svgEl);
-    if (!svgStr.includes('xmlns=')) {
-      svgStr = svgStr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-    }
     const img = new Image();
     const svgBlob = new Blob([svgStr], { type: 'image/svg+xml' });
     const svgUrl = URL.createObjectURL(svgBlob);
@@ -429,9 +452,9 @@ function flattenCampaign(c) {
   }));
 }
 
-function exportCampaigns(campaigns, filename) {
-  if (!campaigns.length) { showToast('Nenhuma campanha selecionada.'); return; }
-  const rows = campaigns.flatMap(flattenCampaign);
+function exportCampaigns(list, filename) {
+  if (!list.length) { showToast('Nenhuma campanha selecionada.'); return; }
+  const rows = list.flatMap(flattenCampaign);
   const ws = XLSX.utils.json_to_sheet(rows);
   ws['!cols'] = [
     { wch: 22 }, { wch: 18 }, { wch: 28 }, { wch: 24 }, { wch: 34 },
@@ -441,7 +464,7 @@ function exportCampaigns(campaigns, filename) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'UTMs');
 
-  const summaryRows = campaigns.map(c => ({
+  const summaryRows = list.map(c => ({
     Empresa: c.empresa, Unidade: c.unidade, Campanha: c.nome, Slug: c.slug,
     'Qtd. de links': c.tags.length, 'Criado por': c.criadoPor, 'Criado em': c.criadoEm, Descrição: c.descricao
   }));
@@ -475,8 +498,7 @@ function initInfoModal() {
   });
 }
 
-function init() {
-  loadState();
+async function init() {
   document.getElementById('currentUser').value = localStorage.getItem(USER_KEY) || '';
   document.getElementById('currentUser').addEventListener('change', e => {
     localStorage.setItem(USER_KEY, e.target.value.trim());
@@ -500,17 +522,17 @@ function init() {
   });
 
   document.getElementById('btnExportAll').addEventListener('click', () => {
-    exportCampaigns(state.campaigns, 'gude-utms-todas-campanhas.xlsx');
+    exportCampaigns(campaigns, 'gude-utms-todas-campanhas.xlsx');
   });
 
   document.getElementById('btnExportSelected').addEventListener('click', () => {
     const ids = [...document.querySelectorAll('.campSelect:checked')].map(cb => cb.dataset.id);
-    const selected = state.campaigns.filter(c => ids.includes(c.id));
+    const selected = campaigns.filter(c => ids.includes(c.id));
     exportCampaigns(selected, 'gude-utms-selecionadas.xlsx');
   });
 
   document.getElementById('btnExportCampaign').addEventListener('click', () => {
-    const c = state.campaigns.find(x => x.id === currentCampaignId);
+    const c = campaigns.find(x => x.id === currentCampaignId);
     exportCampaigns([c], `gude-utm-${slugify(c.nome || 'campanha')}.xlsx`);
   });
 
@@ -526,7 +548,11 @@ function init() {
   });
 
   initInfoModal();
-  renderDashboard();
+
+  if (initSupabase()) {
+    await loadCampaigns();
+    renderDashboard();
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init);

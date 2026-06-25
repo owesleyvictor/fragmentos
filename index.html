@@ -7,6 +7,8 @@
 <link rel="stylesheet" href="styles.css" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/easyqrcodejs@4.4.13/dist/easy.qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
 </head>
 <body>
   <header class="topbar">
@@ -22,6 +24,8 @@
       <input id="currentUser" type="text" placeholder="Seu nome" />
     </div>
   </header>
+
+  <div class="conn-banner" id="connBanner" hidden></div>
 
   <nav class="tabs">
     <button class="tab-btn active" data-view="dashboard">📋 Campanhas</button>
